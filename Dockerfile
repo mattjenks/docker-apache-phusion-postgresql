@@ -8,6 +8,11 @@ MAINTAINER Matt Jenks <matt.jenks@gmail.com>
 RUN rpm --rebuilddb \
 	&& yum --setopt=tsflags=nodocs -y install \
     httpd \
+	postgresql \
+	postgresql-server \
+	postgresql-libs \
+	postgresql-contrib \
+	postgresql-devel \
 	&& rm -rf /var/cache/yum/* \
 	&& yum clean all
 
@@ -18,9 +23,15 @@ RUN rpm --rebuilddb \
 # www root is /var/www
 # serverroot is /etc/httpd
 #
-RUN mkdir -p -m 750 /var/logs/httpd
+RUN mkdir -p -m 750 /var/log/httpd
 COPY var/www/app/vhost.conf /etc/httpd/conf
 COPY var/www/app/public_html/index.html /var/www/html
+
+#
+# Initialize postgresql database
+#     https://docs.docker.com/engine/examples/postgresql_service/
+#
+RUN service postgresql initdb
 
 #
 # Copy files into place
@@ -39,10 +50,34 @@ RUN mkdir -p /etc/services-config/{httpd/{conf,conf.d},ssl/{certs,private}} \
 	&& chmod +x /etc/apache-bootstrap
 
 #
+# Update postgres settings
+#
+RUN echo "host all  all    0.0.0.0/0  md5" >> /var/lib/pgsql/data/pg_hba.conf
+RUN echo "listen_addresses='*'" >> /var/lib/pgsql/data/postgresql.conf
+
+#
+# Update postgres user
+#
+USER postgres
+# TODO this currently does not work because I cant start supervisor as user postgres. This is probably the wrong way
+# to go about this anyway as these images are no longer properly layered.
+# TODO this is poor as it is a password. Fix this!
+RUN /usr/bin/pg_ctl start -l /var/lib/pgsql/data/pg.log -D /var/lib/pgsql/data/ \
+   && /bin/sleep 2 \
+   && psql --command "ALTER USER postgres WITH ENCRYPTED PASSWORD 'postgres';" template1
+
+#
 # Expose ports
 # Apache - 80
+# postgresql - 5432
 #
-EXPOSE 80
+EXPOSE 80 5432
+
+#
+# Expose Volumes
+#
+VOLUME  ["/var/www", "/var/lib/pgsql/data"]
+
 
 #
 # Start supervisor
